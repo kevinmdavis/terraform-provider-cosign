@@ -18,12 +18,13 @@ import (
 	"github.com/secure-systems-lab/go-securesystemslib/dsse"
 	"github.com/sigstore/cosign/v2/pkg/cosign/attestation"
 	"github.com/sigstore/cosign/v2/pkg/cosign/bundle"
-	cbundle "github.com/sigstore/cosign/v2/pkg/cosign/bundle"
+	"github.com/sigstore/cosign/v2/pkg/oci"
 	"github.com/sigstore/cosign/v2/pkg/oci/mutate"
 	ociremote "github.com/sigstore/cosign/v2/pkg/oci/remote"
 	"github.com/sigstore/cosign/v2/pkg/oci/static"
 	ctypes "github.com/sigstore/cosign/v2/pkg/types"
 	"github.com/sigstore/rekor/pkg/generated/client"
+	"github.com/sigstore/rekor/pkg/generated/models"
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
 	"github.com/sigstore/sigstore/pkg/signature/options"
 )
@@ -57,6 +58,74 @@ func NewStatement(digest name.Digest, predicate io.Reader, ptype string) (*types
 	}, nil
 }
 
+func newPendingAttestation(payload []byte, proposedEntry models.ProposedEntry, opts ...static.Option) (*pendingSignature, error) {
+	sig, err := static.NewAttestation(payload, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating attestation: %w", err)
+	}
+	return &pendingSignature{
+		Pending:       sig,
+		payload:       payload,
+		b64sig:        "",
+		opts:          opts,
+		proposedEntry: proposedEntry,
+	}, nil
+}
+
+// pendingSignature is a signature that is signed but does not have the rekor bundle attached yet.
+type pendingSignature struct {
+	Pending oci.Signature
+
+	payload       []byte
+	b64sig        string
+	opts          []static.Option
+	proposedEntry models.ProposedEntry
+}
+
+func (p *pendingSignature) Finalized(ctx context.Context, rekorClient *client.Rekor) (oci.Signature, error) {
+	entry, err := tlog.Upload(ctx, rekorClient, p.proposedEntry)
+	if err != nil {
+		return nil, fmt.Errorf("uploading to rekor: %w", err)
+	}
+	bundle := bundle.EntryToBundle(entry)
+	finalizedOpts := make([]static.Option, len(p.opts))
+	finalizedOpts = append(finalizedOpts, p.opts...)
+	finalizedOpts = append(finalizedOpts, static.WithBundle(bundle))
+	return static.NewSignature(p.payload, p.b64sig, finalizedOpts...)
+}
+
+func finalizeSignatures(ctx context.Context, allSigs oci.Signatures, pendingSigs []*pendingSignature, rekorClient *client.Rekor) (oci.Signatures, error) {
+	digestToSig := make(map[v1.Hash]*pendingSignature)
+	for _, sig := range pendingSigs {
+		digest, err := sig.Pending.Digest()
+		if err != nil {
+			return nil, fmt.Errorf("calculating digest: %w", err)
+		}
+		digestToSig[digest] = sig
+	}
+	sigs, err := allSigs.Get()
+	if err != nil {
+		return nil, fmt.Errorf("getting signatures: %w", err)
+	}
+	var result []oci.Signature
+	for _, sig := range sigs {
+		digest, err := sig.Digest()
+		if err != nil {
+			return nil, fmt.Errorf("calculating digest: %w", err)
+		}
+		if pendingSig, ok := digestToSig[digest]; ok {
+			finalized, err := pendingSig.Finalized(ctx, rekorClient)
+			if err != nil {
+				return nil, fmt.Errorf("finalizing signature: %w", err)
+			}
+			result = append(result, finalized)
+		} else {
+			result = append(result, sig)
+		}
+	}
+	return &replaceOCISignatures{Signatures: allSigs, sigs: result}, nil
+}
+
 // Attest is roughly equivalent to cosign attest.
 // The only real implementation of types.CosignerSignerVerifier is fulcio.SignerVerifier.
 func Attest(ctx context.Context, conflict string, statements []*types.Statement, sv types.CosignerSignerVerifier, rekorClient *client.Rekor, ropt []remote.Option) error {
@@ -86,6 +155,8 @@ func Attest(ctx context.Context, conflict string, statements []*types.Statement,
 	if len(statements) == 0 {
 		return nil
 	}
+
+	var pendingAtts []*pendingSignature
 
 	for _, statement := range statements {
 		// Make sure these statements are all for the same subject.
@@ -145,13 +216,6 @@ func Attest(ctx context.Context, conflict string, statements []*types.Statement,
 			return fmt.Errorf("creating intoto entry: %w", err)
 		}
 
-		entry, err := tlog.Upload(ctx, rekorClient, e)
-		if err != nil {
-			return fmt.Errorf("uploading to rekor: %w", err)
-		}
-
-		bundle := cbundle.EntryToBundle(entry)
-
 		predicateType, err := parsePredicateType(statement.Type)
 		if err != nil {
 			return err
@@ -159,16 +223,10 @@ func Attest(ctx context.Context, conflict string, statements []*types.Statement,
 
 		opts := []static.Option{
 			static.WithCertChain(rawCert, rawChain),
-			static.WithBundle(bundle),
 			static.WithLayerMediaType(ctypes.DssePayloadType),
 			static.WithAnnotations(map[string]string{
 				"predicateType": predicateType,
 			}),
-		}
-
-		att, err := static.NewAttestation(envelope, opts...)
-		if err != nil {
-			return err
 		}
 
 		signOpts := []mutate.SignOption{}
@@ -176,13 +234,28 @@ func Attest(ctx context.Context, conflict string, statements []*types.Statement,
 			signOpts = append(signOpts, mutate.WithReplaceOp(replacePredicate(predicateType)))
 		}
 
+		att, err := newPendingAttestation(envelope, e, opts...)
+		if err != nil {
+			return err
+		}
+		pendingAtts = append(pendingAtts, att)
 		// Attach the attestation to the entity.
-		se, err = mutate.AttachAttestationToEntity(se, att, signOpts...)
+		se, err = mutate.AttachAttestationToEntity(se, att.Pending, signOpts...)
 		if err != nil {
 			return err
 		}
 	}
 
+	atts, err = se.Attestations()
+	if err != nil {
+		return fmt.Errorf("getting attestations: %w", err)
+	}
+	atts, err = finalizeSignatures(ctx, atts, pendingAtts, rekorClient)
+	if err != nil {
+		return fmt.Errorf("finalizingSignatures: %w", err)
+	}
+
+	se = &replaceAttestations{SignedEntity: se, atts: atts}
 	// Publish the attestations associated with this entity
 	return ociremote.WriteAttestations(digest.Repository, se, ropts...)
 }

@@ -108,3 +108,12 @@ type replaceOCISignatures struct {
 func (r *replaceOCISignatures) Get() ([]oci.Signature, error) {
 	return r.sigs, nil
 }
+
+type replaceAttestations struct {
+	oci.SignedEntity
+	atts oci.Signatures
+}
+
+func (r *replaceAttestations) Attestations() (oci.Signatures, error) {
+	return r.atts, nil
+}
