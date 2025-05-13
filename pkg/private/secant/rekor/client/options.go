@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-retryablehttp"
 	"golang.org/x/time/rate"
 )
@@ -33,7 +34,8 @@ type options struct {
 	// Client-side rate limiting to avoid rekor 429s.
 	// This is the only real difference from upstream.
 	// I'd rather just make the transport pluggable if we upstream this.
-	limiter *rate.Limiter
+	limiter              *rate.Limiter
+	defaultHttpTransport http.RoundTripper
 }
 
 const (
@@ -47,7 +49,8 @@ func makeOptions(opts ...Option) *options {
 		RetryCount: DefaultRetryCount,
 		// A little bird told me that rekor allows 500 requests per minute.
 		// We want to stay well under that, so we'll round down to 5 QPS.
-		limiter: rate.NewLimiter(5.0, 1),
+		limiter:              rate.NewLimiter(5.0, 1),
+		defaultHttpTransport: cleanhttp.DefaultPooledTransport(),
 	}
 
 	for _, opt := range opts {
@@ -99,12 +102,9 @@ func (rt *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return rt.RoundTripper.RoundTrip(req)
 }
 
-func createRoundTripper(inner http.RoundTripper, o *options) http.RoundTripper {
-	if inner == nil {
-		inner = http.DefaultTransport
-	}
+func createRoundTripper(o *options) http.RoundTripper {
 	return &roundTripper{
-		RoundTripper: inner,
+		RoundTripper: o.defaultHttpTransport,
 		UserAgent:    o.UserAgent,
 		limiter:      o.limiter,
 	}
