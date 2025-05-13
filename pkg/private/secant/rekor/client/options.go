@@ -15,10 +15,11 @@
 package client
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/hashicorp/go-retryablehttp"
-	"go.uber.org/ratelimit"
+	"golang.org/x/time/rate"
 )
 
 // Option is a functional option for customizing static signatures.
@@ -32,7 +33,7 @@ type options struct {
 	// Client-side rate limiting to avoid rekor 429s.
 	// This is the only real difference from upstream.
 	// I'd rather just make the transport pluggable if we upstream this.
-	limiter ratelimit.Limiter
+	limiter *rate.Limiter
 }
 
 const (
@@ -46,7 +47,7 @@ func makeOptions(opts ...Option) *options {
 		RetryCount: DefaultRetryCount,
 		// A little bird told me that rekor allows 500 requests per minute.
 		// We want to stay well under that, so we'll round down to 5 QPS.
-		limiter: ratelimit.New(5, ratelimit.WithoutSlack),
+		limiter: rate.NewLimiter(5.0, 1),
 	}
 
 	for _, opt := range opts {
@@ -83,7 +84,7 @@ func WithLogger(logger interface{}) Option {
 type roundTripper struct {
 	http.RoundTripper
 	UserAgent string
-	limiter   ratelimit.Limiter
+	limiter   *rate.Limiter
 }
 
 // RoundTrip implements `http.RoundTripper`
@@ -91,7 +92,9 @@ func (rt *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.Header.Set("User-Agent", rt.UserAgent)
 
 	// Blocks to avoid hitting rate limits.
-	rt.limiter.Take()
+	if err := rt.limiter.Wait(req.Context()); err != nil {
+		return nil, fmt.Errorf("waiting for rate limiter: %w", err)
+	}
 
 	return rt.RoundTripper.RoundTrip(req)
 }
