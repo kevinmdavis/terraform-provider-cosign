@@ -38,9 +38,17 @@ var (
 
 // RekorRateLimiter is used to throttle calls to Rekor when signing or
 // attesting images in order to stay within the rate limits. Defaults to a
-// 5 QPS limit. Aliased to tlog.RekorRateLimiter so the same instance governs
-// both the pre-call waits here and the retry-time waits inside tlog.Upload.
+// 5 QPS limit. Initialized from tlog.RekorRateLimiter so the same instance
+// governs both the pre-call waits here and the retry-time waits inside
+// tlog.Upload. Use SetRekorRateLimiter to override both consistently.
 var RekorRateLimiter = tlog.RekorRateLimiter
+
+// SetRekorRateLimiter overrides the limiter for all Rekor calls, including the
+// retry-time waits inside tlog.
+func SetRekorRateLimiter(l tlog.Limiter) {
+	RekorRateLimiter = l
+	tlog.RekorRateLimiter = l
+}
 
 // NewStatement generates a statement for use in Attest.
 func NewStatement(digest name.Digest, predicate io.Reader, ptype string) (*types.Statement, error) {

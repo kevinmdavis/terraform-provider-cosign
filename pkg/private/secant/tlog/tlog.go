@@ -29,10 +29,17 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// Limiter throttles calls to Rekor. It is satisfied by
+// *golang.org/x/time/rate.Limiter.
+type Limiter interface {
+	Wait(ctx context.Context) error
+	WaitN(ctx context.Context, n int) error
+}
+
 // RekorRateLimiter throttles all calls to Rekor (including retries from
 // createLogEntryWithRetry) to stay within rate limits. Defaults to 5 QPS with
 // a burst of 50.
-var RekorRateLimiter = rate.NewLimiter(5.0, 50)
+var RekorRateLimiter Limiter = rate.NewLimiter(5.0, 50)
 
 const createLogEntryMaxAttempts = 5
 

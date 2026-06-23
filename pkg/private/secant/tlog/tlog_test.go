@@ -11,6 +11,13 @@ import (
 	"github.com/sigstore/rekor/pkg/generated/client/entries"
 )
 
+// countingLimiter counts Wait calls so tests can assert the throttle is
+// exercised on retries.
+type countingLimiter int
+
+func (c *countingLimiter) Wait(context.Context) error       { *c++; return nil }
+func (c *countingLimiter) WaitN(context.Context, int) error { return nil }
+
 func TestIsRetryableRekorError(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -36,6 +43,11 @@ func TestIsRetryableRekorError(t *testing.T) {
 func TestCreateLogEntryWithRetry_RetriesTransient(t *testing.T) {
 	defer shrinkRetryBackoff(t)()
 
+	prev := RekorRateLimiter
+	var waits countingLimiter
+	RekorRateLimiter = &waits
+	defer func() { RekorRateLimiter = prev }()
+
 	var attempts int
 	transient := errors.New("stream error: stream ID 1; INTERNAL_ERROR; received from peer")
 
@@ -54,6 +66,9 @@ func TestCreateLogEntryWithRetry_RetriesTransient(t *testing.T) {
 	}
 	if attempts != 3 {
 		t.Errorf("attempts = %d, want 3", attempts)
+	}
+	if waits != 2 {
+		t.Errorf("limiter Wait calls = %d, want 2 (one per retry)", waits)
 	}
 }
 
