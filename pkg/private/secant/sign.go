@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/chainguard-dev/terraform-provider-cosign/pkg/private/secant/rekor"
 	"github.com/chainguard-dev/terraform-provider-cosign/pkg/private/secant/types"
@@ -88,6 +89,7 @@ func SignEntity(ctx context.Context, se oci.SignedEntity, subject name.Digest, c
 
 // Sign is roughly equivalent to cosign sign.
 func Sign(ctx context.Context, conflict string, annotations map[string]any, sv types.CosignerVerifier, rekorClient *client.Rekor, imgs []name.Digest, ropt []remote.Option) error {
+	defer observeDuration("sign", "legacy", time.Now())
 	opts := []ociremote.Option{ociremote.WithRemoteOptions(ropt...)}
 
 	for _, ref := range imgs {

@@ -198,6 +198,7 @@ func (bs *BundleSigner) SignContent(ctx context.Context, content sign.Content) (
 // has an identical payload, REPLACE deletes existing referrers with matching
 // predicate type before writing.
 func SignBundle(ctx context.Context, conflict string, annotations map[string]any, signer *BundleSigner, imgs []name.Digest, ropt []remote.Option) error {
+	defer observeDuration("sign", "bundle", time.Now())
 	opts := []ociremote.Option{ociremote.WithRemoteOptions(ropt...)}
 
 	for _, digest := range imgs {
@@ -261,6 +262,7 @@ func AttestBundle(ctx context.Context, conflict string, statements []*types.Stat
 	if len(statements) == 0 {
 		return nil
 	}
+	defer observeDuration("attest", "bundle", time.Now())
 
 	ociOpts := []ociremote.Option{ociremote.WithRemoteOptions(ropt...)}
 

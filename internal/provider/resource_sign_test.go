@@ -63,6 +63,10 @@ func TestAccResourceCosignSign(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Signing should record a latency observation on the operation histogram.
+	reg := newSecantMetricsRegistry(t)
+	before := operationDurationCount(t, reg, "sign")
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -171,6 +175,10 @@ data "cosign_verify" "bar" {
 			},
 		},
 	})
+
+	if after := operationDurationCount(t, reg, "sign"); after <= before {
+		t.Errorf("expected cosign_sign to record a sign duration observation (before=%d, after=%d)", before, after)
+	}
 }
 
 func TestAccResourceCosignSignConflict(t *testing.T) {

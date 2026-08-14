@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"time"
 
 	rekordsse "github.com/chainguard-dev/terraform-provider-cosign/pkg/private/secant/models/dsse"
 	"github.com/chainguard-dev/terraform-provider-cosign/pkg/private/secant/models/intoto"
@@ -43,11 +44,29 @@ var (
 // both the pre-call waits here and the retry-time waits inside tlog.Upload.
 var RekorRateLimiter = tlog.RekorRateLimiter
 
+// operationDurationSeconds records end-to-end latency of the top-level sign and
+// attest operations, labeled by operation ("sign"/"attest") and signature format
+// ("legacy"/"bundle").
+var operationDurationSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Name:    "secant_operation_duration_seconds",
+	Help:    "Seconds spent in a sign or attest operation, measured end to end.",
+	Buckets: prometheus.ExponentialBuckets(0.05, 2, 12),
+}, []string{"operation", "format"})
+
 // RegisterMetrics registers secant's collectors with r. Hosts that scrape
 // metrics call this once (typically with prometheus.DefaultRegisterer); the
 // Terraform provider never does, so its observations stay uncollected.
 func RegisterMetrics(r prometheus.Registerer) error {
-	return tlog.RegisterMetrics(r)
+	if err := tlog.RegisterMetrics(r); err != nil {
+		return err
+	}
+	return r.Register(operationDurationSeconds)
+}
+
+// observeDuration records the time since start against operationDurationSeconds
+// for the given operation and signature format.
+func observeDuration(operation, format string, start time.Time) {
+	operationDurationSeconds.WithLabelValues(operation, format).Observe(time.Since(start).Seconds())
 }
 
 // NewStatement generates a statement for use in Attest.
@@ -231,6 +250,7 @@ func Attest(ctx context.Context, conflict string, statements []*types.Statement,
 	if len(statements) == 0 {
 		return nil
 	}
+	defer observeDuration("attest", "legacy", time.Now())
 	digest := statements[0].Digest
 
 	// We don't actually need to access the remote entity to attach things to it

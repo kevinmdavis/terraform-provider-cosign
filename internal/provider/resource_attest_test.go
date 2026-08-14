@@ -69,6 +69,10 @@ func TestAccResourceCosignAttest(t *testing.T) {
 	rawHash := sha256.Sum256([]byte(contents))
 	hash := hex.EncodeToString(rawHash[:])
 
+	// Attesting should record a latency observation on the operation histogram.
+	reg := newSecantMetricsRegistry(t)
+	before := operationDurationCount(t, reg, "attest")
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -220,6 +224,10 @@ data "cosign_verify" "bar" {
 			},
 		},
 	})
+
+	if after := operationDurationCount(t, reg, "attest"); after <= before {
+		t.Errorf("expected cosign_attest to record an attest duration observation (before=%d, after=%d)", before, after)
+	}
 
 	attRef := ref1.Tag(strings.ReplaceAll(dig1.String(), ":", "-") + ".att")
 

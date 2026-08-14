@@ -11,8 +11,15 @@ import (
 	"github.com/chainguard-dev/terraform-provider-cosign/pkg/private/secant/types"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sigstore/cosign/v3/pkg/cosign/bundle"
 )
+
+func TestRegisterMetrics(t *testing.T) {
+	if err := RegisterMetrics(prometheus.NewRegistry()); err != nil {
+		t.Fatalf("RegisterMetrics: %v", err)
+	}
+}
 
 func TestNewStatement(t *testing.T) {
 	digest, err := name.NewDigest("example.com/image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
