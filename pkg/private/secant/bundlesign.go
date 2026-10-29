@@ -20,7 +20,6 @@ import (
 	ggcrtypes "github.com/google/go-containerregistry/pkg/v1/types"
 	intotov1 "github.com/in-toto/attestation/go/v1"
 	"github.com/sigstore/cosign/v3/pkg/cosign"
-	cbundle "github.com/sigstore/cosign/v3/pkg/cosign/bundle"
 	"github.com/sigstore/cosign/v3/pkg/oci"
 	ociremote "github.com/sigstore/cosign/v3/pkg/oci/remote"
 	"github.com/sigstore/cosign/v3/pkg/oci/walk"
@@ -47,6 +46,7 @@ type BundleSigner struct {
 	trustedMaterial root.TrustedMaterial
 	keypair         sign.Keypair
 	certs           sign.CertificateProvider
+	transport       http.RoundTripper
 }
 
 // BundleSignerOption customizes a BundleSigner at construction.
@@ -56,6 +56,7 @@ type bundleSignerConfig struct {
 	signingConfig   *root.SigningConfig
 	trustedMaterial root.TrustedMaterial
 	certs           sign.CertificateProvider
+	transport       http.RoundTripper
 }
 
 // WithSigningConfig overrides the SigningConfig that would otherwise be loaded
@@ -80,6 +81,16 @@ func WithCertificateProvider(p sign.CertificateProvider) BundleSignerOption {
 	return func(c *bundleSignerConfig) { c.certs = p }
 }
 
+// WithTransport sets the transport for timestamp authority and Rekor requests
+// made while signing, in place of http.DefaultTransport. The default
+// certificate provider also uses it for Fulcio requests. A provider set with
+// WithCertificateProvider controls its own transport. Each request using this
+// transport carries the context passed to the signing call, so a tracing
+// transport records it under the caller's span.
+func WithTransport(rt http.RoundTripper) BundleSignerOption {
+	return func(c *bundleSignerConfig) { c.transport = rt }
+}
+
 // NewBundleSigner loads SigningConfig and TrustedMaterial from TUF (unless
 // overridden via options) and generates an ephemeral keypair for signing.
 func NewBundleSigner(oidc fulcio.OIDCProvider, opts ...BundleSignerOption) (*BundleSigner, error) {
@@ -102,7 +113,7 @@ func NewBundleSigner(oidc fulcio.OIDCProvider, opts ...BundleSignerOption) (*Bun
 		cfg.trustedMaterial = tr
 	}
 	if cfg.certs == nil {
-		inner, err := fulcio.NewCertProvider(cfg.signingConfig)
+		inner, err := fulcio.NewCertProvider(cfg.signingConfig, cfg.transport)
 		if err != nil {
 			return nil, fmt.Errorf("creating fulcio client: %w", err)
 		}
@@ -118,6 +129,7 @@ func NewBundleSigner(oidc fulcio.OIDCProvider, opts ...BundleSignerOption) (*Bun
 		trustedMaterial: cfg.trustedMaterial,
 		keypair:         keypair,
 		certs:           cfg.certs,
+		transport:       cfg.transport,
 	}, nil
 }
 
@@ -142,7 +154,7 @@ func (bs *BundleSigner) SignContent(ctx context.Context, content sign.Content) (
 		return nil, fmt.Errorf("retrieving ID token: %w", err)
 	}
 
-	bundle, err := cbundle.SignData(ctx, content, bs.keypair, idToken, nil, nil, bs.signingConfig, bs.trustedMaterial, cbundle.SignOptions{CertificateProvider: bs.certs})
+	bundle, err := bs.signData(ctx, content, idToken)
 	if err != nil {
 		return nil, fmt.Errorf("signing bundle: %w", err)
 	}
