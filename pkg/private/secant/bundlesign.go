@@ -20,6 +20,7 @@ import (
 	ggcrtypes "github.com/google/go-containerregistry/pkg/v1/types"
 	intotov1 "github.com/in-toto/attestation/go/v1"
 	"github.com/sigstore/cosign/v3/pkg/cosign"
+	cbundle "github.com/sigstore/cosign/v3/pkg/cosign/bundle"
 	"github.com/sigstore/cosign/v3/pkg/oci"
 	ociremote "github.com/sigstore/cosign/v3/pkg/oci/remote"
 	"github.com/sigstore/cosign/v3/pkg/oci/walk"
@@ -154,7 +155,11 @@ func (bs *BundleSigner) SignContent(ctx context.Context, content sign.Content) (
 		return nil, fmt.Errorf("retrieving ID token: %w", err)
 	}
 
-	bundle, err := bs.signData(ctx, content, idToken)
+	bundle, err := cbundle.SignData(ctx, content, bs.keypair, idToken, nil, nil, bs.signingConfig, bs.trustedMaterial, cbundle.SignOptions{
+		CertificateProvider:  bs.certs,
+		TSAClientTransport:   bs.transport,
+		RekorClientTransport: bs.transport,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("signing bundle: %w", err)
 	}

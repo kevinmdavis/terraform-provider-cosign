@@ -704,8 +704,6 @@ github.com/shibumi/go-pathspec v1.3.0 h1:QUyMZhFo0Md5B8zV8x2tesohbb5kfbpTi9rBnKh
 github.com/shibumi/go-pathspec v1.3.0/go.mod h1:Xutfslp817l2I1cZvgcfeMQJG5QnU2lh5tVaaMCl3jE=
 github.com/shopspring/decimal v1.4.0 h1:bxl37RwXBklmTi0C79JfXCEBD1cqqHt0bbgBAGFp81k=
 github.com/shopspring/decimal v1.4.0/go.mod h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+DMd9qYNcwME=
-github.com/sigstore/cosign/v3 v3.1.4 h1:d3UHS8oJebMf6XUhPtWv9weU1ZYRyXq9HJ7QPccmqvY=
-github.com/sigstore/cosign/v3 v3.1.4/go.mod h1:ZKgAdeS65uMLm3uoY8TiQGdzA8BoKYBSEIo2DEd1/4s=
 github.com/sigstore/fulcio v1.9.1 h1:8YJ+TY23ZyKo4ZPerVXvo8RsXs1WxwVmzniewzeeNIU=
 github.com/sigstore/fulcio v1.9.1/go.mod h1:F54nh3c9v8RWOJ1RzObTCms7KfUP5CRQu7cKNt6wbr4=
 github.com/sigstore/policy-controller v0.15.2-0.20260824192639-d4c3f41c394a h1:/BY+e7T5pajIiw++p3DEeqDuMzDkI7Mi6yD8pOGXnxE=
